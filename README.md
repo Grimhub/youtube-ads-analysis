@@ -54,6 +54,10 @@ Google OAuth apps with an External audience and Testing status generally issue r
 
 No production credentials are included. Keep the encryption and signing keys stable across deployments. Losing the token store or changing its keys requires reconnection. Back up the encrypted store and protect its encryption key separately.
 
+For an existing connection that cannot open a new Google approval flow, an operator can temporarily set `AUTH_DIAGNOSTIC_ON_STARTUP=1`. On the next deployment, a bounded startup subprocess inspects the latest stored Google grant and reports only validation stages, status codes and boolean checks. It does not request consent, refresh a token, change stored grants or expose credentials. `AUTH_DIAGNOSTIC_CANDIDATE_EMAIL` optionally tests whether the verified account matches a proposed owner address; this comparison does not authorise that address. Disable the startup flag after collecting the result.
+
+This diagnostic checks a saved Google grant, not the exact bearer token held by ChatGPT. A passing diagnostic alone does not prove that a plugin call will succeed. Diagnostic failures do not prevent the server from starting, and the subprocess is limited to 20 seconds.
+
 The container initialises the token directory on the mounted volume and drops to UID/GID 10001 before starting the HTTP server. Deploy one replica with one worker. The file-backed token store is not configured for distributed concurrent replicas. A host without a persistent filesystem, such as an ordinary Cloud Run instance, needs a different persistent store before this application can be used reliably there.
 
 The application fails to start if required settings are absent. Health status is available at `/health`; Google account information is not exposed there. OAuth discovery and consent endpoints are public. `/mcp` requires a valid server-issued token and the configured, Google-verified owner email. HTTP request logging is disabled to keep OAuth callback query strings out of access logs.
