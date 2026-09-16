@@ -1,8 +1,32 @@
 """Initialise a mounted token directory, then run the server without root privileges."""
 
 import os
+import json
+import subprocess
 import sys
 from pathlib import Path
+
+
+def run_auth_diagnostic() -> None:
+    """Optionally inspect a saved grant without delaying server startup indefinitely."""
+    if os.environ.get("AUTH_DIAGNOSTIC_ON_STARTUP") != "1":
+        return
+    try:
+        result = subprocess.run(
+            [sys.executable, "diagnose_existing_auth.py"],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if result.returncode != 0:
+            raise ValueError("Diagnostic did not complete")
+        report = json.loads(result.stdout)
+        if not isinstance(report, dict):
+            raise ValueError("Invalid diagnostic result")
+        print("AUTH_DIAGNOSTIC " + json.dumps(report, sort_keys=True), flush=True)
+    except Exception:
+        # Never forward exception text or a subprocess traceback: either could
+        # contain private request details. Failure must not prevent startup.
+        print('AUTH_DIAGNOSTIC {"stage":"diagnostic_unavailable"}', flush=True)
+
 
 if __name__ == "__main__":
     os.umask(0o077)
@@ -16,4 +40,5 @@ if __name__ == "__main__":
         os.setgroups([])
         os.setgid(10001)
         os.setuid(10001)
+    run_auth_diagnostic()
     os.execv(sys.executable, [sys.executable, "server.py"])
