@@ -1,0 +1,12 @@
+.git
+.env*
+.secrets*
+__pycache__
+.pytest_cache
+tests
+*.zip
+*.md
+.codex-plugin
+.mcp.json
+oauth
+data

@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.secrets*
+__pycache__/
+.pytest_cache/
+.venv/
+data/
+oauth/
+*.zip
+SETUP-STATUS.md
