@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -35,8 +36,21 @@ class Settings:
     jwt_signing_key: str = field(repr=False)
     token_store_dir: Path
     allowed_client_redirect_uris: tuple[str, ...] = CHATGPT_REDIRECT_URIS
+    meta_access_token: str | None = field(default=None, repr=False)
+    meta_ad_account_id: str | None = None
+    meta_graph_api_version: str = "v26.0"
 
     def __post_init__(self) -> None:
+        if bool(self.meta_access_token) != bool(self.meta_ad_account_id):
+            raise ValueError("Configure META_ACCESS_TOKEN and META_AD_ACCOUNT_ID together.")
+        if self.meta_access_token is not None and (
+            not self.meta_access_token or any(c.isspace() for c in self.meta_access_token)
+        ):
+            raise ValueError("META_ACCESS_TOKEN must be a non-empty token without whitespace.")
+        if self.meta_ad_account_id is not None and not re.fullmatch(r"act_[0-9]+", self.meta_ad_account_id):
+            raise ValueError("META_AD_ACCOUNT_ID must be an act_ prefixed numeric ID.")
+        if not re.fullmatch(r"v[0-9]+\.[0-9]+", self.meta_graph_api_version):
+            raise ValueError("META_GRAPH_API_VERSION must be a version such as v26.0.")
         parsed = urlsplit(self.public_base_url)
         if (
             parsed.scheme != "https"
@@ -116,4 +130,7 @@ class Settings:
             jwt_signing_key=os.environ["JWT_SIGNING_KEY"],
             token_store_dir=Path(os.environ["TOKEN_STORE_DIR"]),
             allowed_client_redirect_uris=redirects,
+            meta_access_token=os.environ.get("META_ACCESS_TOKEN") or None,
+            meta_ad_account_id=os.environ.get("META_AD_ACCOUNT_ID") or None,
+            meta_graph_api_version=os.environ.get("META_GRAPH_API_VERSION", "v26.0"),
         )

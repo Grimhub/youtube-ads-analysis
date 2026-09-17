@@ -76,6 +76,20 @@ def test_secrets_excluded_from_settings_repr(settings):
     assert settings.google_client_secret not in representation
     assert settings.jwt_signing_key not in representation
     assert settings.token_encryption_key not in representation
+    with_meta = replace(settings, meta_access_token="fixture-meta-secret", meta_ad_account_id="act_123")
+    assert with_meta.meta_access_token not in repr(with_meta)
+
+
+@pytest.mark.parametrize("overrides", [
+    {"meta_access_token": "fixture-meta-secret"},
+    {"meta_ad_account_id": "act_123"},
+    {"meta_access_token": "fixture-meta-secret", "meta_ad_account_id": "act_123/ads"},
+    {"meta_access_token": "contains whitespace", "meta_ad_account_id": "act_123"},
+    {"meta_graph_api_version": "v26.0/../me"},
+])
+def test_meta_configuration_cannot_leak_tokens_or_change_request_target(settings, overrides):
+    with pytest.raises(ValueError):
+        replace(settings, **overrides)
 
 
 @pytest.mark.parametrize("url", [
@@ -156,3 +170,59 @@ async def test_tool_catalogue_only_exposes_read_operations(settings):
     assert tools
     assert all(tool.annotations.read_only_hint is True for tool in tools)
     assert not any(any(word in tool.name for word in ("create", "delete", "mutate", "update")) for tool in tools)
+
+
+@pytest.mark.asyncio
+async def test_meta_tools_are_optional_and_require_verified_owner(settings, monkeypatch):
+    from fastmcp.exceptions import ToolError
+    import server as server_module
+
+    assert not any(t.name.startswith("meta_") for t in await create_server(settings).list_tools())
+    configured = replace(settings, meta_access_token="fixture-meta-secret", meta_ad_account_id="act_123")
+    server = create_server(configured)
+    meta_tools = [t for t in await server.list_tools() if t.name.startswith("meta_")]
+    assert {t.name for t in meta_tools} == {
+        "meta_ad_account", "meta_campaigns", "meta_adsets", "meta_ads", "meta_insights",
+    }
+    assert all(t.annotations.read_only_hint for t in meta_tools)
+
+    def denied(_):
+        raise ToolError("Owner login required")
+
+    def unexpected_client(*args, **kwargs):
+        pytest.fail("Meta client must not be created for an unauthorised caller")
+
+    monkeypatch.setattr(server_module, "current_google_token", denied)
+    monkeypatch.setattr(server_module, "MetaReportingClient", unexpected_client)
+    with pytest.raises(ToolError, match="Owner login required"):
+        await server.call_tool("meta_ad_account", {})
+
+
+@pytest.mark.asyncio
+async def test_meta_tool_uses_its_configured_account_and_private_credential(settings, monkeypatch):
+    import server as server_module
+    configured = replace(settings, meta_access_token="fixture-meta-secret", meta_ad_account_id="act_123")
+    called = []
+
+    class Client:
+        def __init__(self, token, account_id, *, api_version):
+            assert token == configured.meta_access_token
+            assert account_id == "act_123"
+            assert api_version == "v26.0"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def account(self):
+            called.append("account")
+            return {"id": "act_123", "name": "Fixture", "currency": "USD"}
+
+    monkeypatch.setattr(server_module, "current_google_token", lambda _: "upstream-google-fixture")
+    monkeypatch.setattr(server_module, "MetaReportingClient", Client)
+    result = await create_server(configured).call_tool("meta_ad_account", {})
+    assert called == ["account"]
+    assert result.structured_content["id"] == "act_123"
+    assert configured.meta_access_token not in str(result)
